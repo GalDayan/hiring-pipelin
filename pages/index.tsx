@@ -2,11 +2,16 @@
 import dynamic from 'next/dynamic';
 import React, { useState, useEffect } from 'react';
 
-// Dynamically import Graph with SSR disabled.
-const Graph = dynamic(
-  () => import('react-d3-graph').then((mod) => mod.Graph),
+// Dynamically import React Flow and its Provider with SSR disabled.
+const ReactFlow = dynamic(
+  () => import('reactflow').then((mod) => mod.ReactFlow),
   { ssr: false }
 );
+const ReactFlowProvider = dynamic(
+  () => import('reactflow').then((mod) => mod.ReactFlowProvider),
+  { ssr: false }
+);
+import 'reactflow/dist/style.css';
 
 interface Person {
   id: string;
@@ -41,9 +46,9 @@ const initialLinks: Link[] = [];
 
 const statusColors: { [key: string]: string } = {
   'To do': '#3498db',
-  'Interview': '#e67e22',
-  'CEO': '#2ecc71',
-  'Rejected': '#e74c3c',
+  Interview: '#e67e22',
+  CEO: '#2ecc71',
+  Rejected: '#e74c3c',
 };
 
 const Home: React.FC = () => {
@@ -192,7 +197,7 @@ const Home: React.FC = () => {
   );
 
   // -----------------------
-  // Build Team Grouping
+  // Build Team Grouping (for team nodes)
   // -----------------------
   const teamNodesMap = new Map<string, { id: string; label: string }>();
   filteredNodes.forEach((node) => {
@@ -203,8 +208,7 @@ const Home: React.FC = () => {
     }
   });
 
-  const yPositions = [50, 250, 500]; // Extend this array if you have more rows
-
+  const yPositions = [50, 450, 850]; // Extend if you have more rows
   const teamNodesArray = Array.from(teamNodesMap.values());
   const TEAMS_IN_A_ROW = 3;
   const pinnedTeamNodes = teamNodesArray.map((teamNode, index) => {
@@ -213,8 +217,8 @@ const Home: React.FC = () => {
       ...teamNode,
       color: '#9b59b6',
       size: 600,
-      fx: (index % TEAMS_IN_A_ROW + 1) * 400, // fixed horizontal position
-      fy: yPositions[row] || 0,  // use lookup array; default to 0 if not defined
+      fx: (index % TEAMS_IN_A_ROW + 1) * 800, // fixed horizontal position
+      fy: yPositions[row] || 0, // fixed vertical position from lookup
       static: true,
     };
   });
@@ -233,86 +237,105 @@ const Home: React.FC = () => {
     teamPositions.set(teamNode.label, { x: teamNode.fx, y: teamNode.fy });
   });
 
-  // Build person nodes. For each person that belongs to a team, if no x/y is stored yet, 
-  // set initial x to the team x and y to team y plus an offset (e.g., 100).
-  const graphPersonNodes = filteredNodes.map((node) => {
-    const nodeLabel = node.starred ? `${node.name} ⭐` : node.name;
-    let extraProps = {};
-    if (node.team && node.x === undefined && node.y === undefined && teamPositions.has(node.team)) {
-      const teamPos = teamPositions.get(node.team)!;
-      debugger;
-      extraProps = { x: teamPos.x - Math.random() * 100, y: teamPos.y + Math.random() * 100 };
-    } else if (node.x !== undefined && node.y !== undefined) {
-      extraProps = { x: node.x, y: node.y };
+  // -----------------------
+  // Build person nodes with a clean layout.
+  // We'll group persons by team and arrange each team's persons in a circle around the team node.
+  // -----------------------
+  const graphPersonNodes: any[] = [];
+  const teamGroups = new Map<string, Person[]>();
+
+  // Group persons with a team that has a defined team position.
+  filteredNodes.forEach((node) => {
+    if (node.team && teamPositions.has(node.team)) {
+      if (!teamGroups.has(node.team)) {
+        teamGroups.set(node.team, []);
+      }
+      teamGroups.get(node.team)!.push(node);
+    } else {
+      // For nodes with no team or no team position, use stored positions (or default to 0,0)
+      const nodeLabel = node.starred ? `${node.name} ⭐` : node.name;
+      graphPersonNodes.push({
+        id: node.id,
+        label: nodeLabel,
+        color: statusColors[node.status],
+        opacity: node.status === 'Rejected' ? 0.4 : 1,
+        x: node.x !== undefined ? node.x : 0,
+        y: node.y !== undefined ? node.y : 0,
+      });
     }
-    return {
-      id: node.id,
-      label: `${nodeLabel}`,
-      color: statusColors[node.status],
-      opacity: node.status === 'Rejected' ? 0.4 : 1,
-      ...extraProps,
-    };
+  });
+
+  // For each team, arrange its persons in a circle around the team node.
+  teamGroups.forEach((nodesInTeam, teamName) => {
+    const teamPos = teamPositions.get(teamName)!;
+    const numNodes = nodesInTeam.length;
+    const radius = 200; // Adjust radius as needed for spacing
+
+    nodesInTeam.forEach((node, i) => {
+      // Evenly distribute nodes around a circle.
+      const angle = (2 * Math.PI * i) / numNodes;
+      const x = teamPos.x + radius * Math.cos(angle);
+      const y = teamPos.y + radius * Math.sin(angle);
+      const nodeLabel = node.starred ? `${node.name} ⭐` : node.name;
+
+      graphPersonNodes.push({
+        id: node.id,
+        label: nodeLabel,
+        color: statusColors[node.status],
+        opacity: node.status === 'Rejected' ? 0.4 : 1,
+        x,
+        y,
+      });
+    });
   });
 
   // Merge person nodes & pinned team nodes.
   const graphNodes = [...graphPersonNodes, ...pinnedTeamNodes];
   const graphLinks = [...filteredLinks, ...teamLinks];
-  const graphData = { nodes: graphNodes, links: graphLinks };
 
-  // Use a custom linkDistance so that people stay near their team node.
-  function linkDistance(link: { source: string; target: string }) {
-    if (
-      link.source.toString().startsWith('team_') ||
-      link.target.toString().startsWith('team_')
-    ) {
-      return 80;
-    }
-    return 200;
-  }
+  // -----------------------
+  // Map graph data to React Flow's format.
+  // -----------------------
+  const rfNodes = graphNodes.map((node) => {
+    const x = node.x !== undefined ? node.x : node.fx ?? 0;
+    const y = node.y !== undefined ? node.y : node.fy ?? 0;
+    return {
+      id: node.id,
+      position: { x, y },
+      data: { label: node.label },
+      style: { background: node.color, opacity: node.opacity },
+      // Make team nodes non-draggable.
+      draggable: !node.id.startsWith('team_'),
+    };
+  });
 
-  // Graph config with dynamic dimensions.
-  const myConfig = {
-    staticGraph: false,
-    width: dimensions.width,
-    height: dimensions.height,
-    nodeHighlightBehavior: true,
-    node: {
-      labelProperty: 'label',
-      size: 400,
-      highlightStrokeColor: 'blue',
-      fontSize: 12,
-      fontColor: 'black',
-      labelPosition: 'top',
-    },
-    link: {
-      highlightColor: 'lightblue',
-    },
-    directed: false,
-    d3: {
-      linkLength: linkDistance,
-      charge: -500,
-      gravity: -100,
-    },
-  };
+  // Map links to React Flow edges.
+  // If an edge leads to a starred node, mark it as animated.
+  const rfEdges = graphLinks.map((edge, index) => {
+    const targetNode = nodes.find((n) => n.id === edge.target);
+    return {
+      id: `e-${edge.source}-${edge.target}-${index}`,
+      source: edge.source,
+      target: edge.target,
+      animated: targetNode?.starred || false,
+    };
+  });
 
+  // -----------------------
+  // Handlers for React Flow events.
+  // -----------------------
   const handleNodePositionChange = (nodeId: string, x: number, y: number) => {
-    debugger
     // Ignore team nodes (or any node not present in your state)
     if (!nodes.some((n) => n.id === nodeId)) return;
-
     setNodes((prev) =>
-      prev.map((n) =>
-        n.id === nodeId ? { ...n, x, y } : n
-      )
+      prev.map((n) => (n.id === nodeId ? { ...n, x, y } : n))
     );
   };
 
-  // Generate team options for the top form.
-  const teamOptionsList = Array.from(
-    new Set(nodes.map((node) => node.team).filter((team) => team !== ''))
-  );
+  const onNodeDragStop = (_: any, node: any) => {
+    handleNodePositionChange(node.id, node.position.x, node.position.y);
+  };
 
-  // Clicking on a node => open modal if it's a person.
   const handleNodeClick = (nodeId: string) => {
     if (nodeId.startsWith('team_')) return;
     const person = nodes.find((node) => node.id === nodeId);
@@ -324,6 +347,16 @@ const Home: React.FC = () => {
       setChildStarred(false);
     }
   };
+
+  const onNodeClick = (_: any, node: any) => {
+    if (node.id.startsWith('team_')) return;
+    handleNodeClick(node.id);
+  };
+
+  // Generate team options for the top form.
+  const teamOptionsList = Array.from(
+    new Set(nodes.map((node) => node.team).filter((team) => team !== ''))
+  );
 
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif', backgroundColor: '#f5f5f5' }}>
@@ -533,7 +566,7 @@ const Home: React.FC = () => {
         </div>
       </div>
 
-      {/* Graph Display (Full Width) */}
+      {/* Graph Display using React Flow */}
       <div
         style={{
           width: '100%',
@@ -544,13 +577,17 @@ const Home: React.FC = () => {
           overflowX: 'auto',
         }}
       >
-        <Graph
-          id="graph-id"
-          data={graphData}
-          config={myConfig}
-          onClickNode={handleNodeClick}
-          onNodePositionChange={handleNodePositionChange}
-        />
+        <ReactFlowProvider>
+          <div style={{ width: dimensions.width, height: dimensions.height }}>
+            <ReactFlow
+              nodes={rfNodes}
+              edges={rfEdges}
+              onNodeDragStop={onNodeDragStop}
+              onNodeClick={onNodeClick}
+              style={{ width: '100%', height: '100%' }}
+            />
+          </div>
+        </ReactFlowProvider>
       </div>
 
       {/* Quick Edit & Add Child Person Modal */}
