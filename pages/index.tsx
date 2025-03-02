@@ -69,7 +69,7 @@ const Home: React.FC = () => {
 
   // State for dynamic graph dimensions
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  
+
   useEffect(() => {
     // Set dimensions on mount and on resize
     const handleResize = () => {
@@ -202,15 +202,22 @@ const Home: React.FC = () => {
       }
     }
   });
+
+  const yPositions = [50, 250, 500]; // Extend this array if you have more rows
+
   const teamNodesArray = Array.from(teamNodesMap.values());
-  const pinnedTeamNodes = teamNodesArray.map((teamNode, index) => ({
-    ...teamNode,
-    color: '#9b59b6',
-    size: 600,
-    fx: (index + 1) * 250, // fixed horizontal position
-    fy: 50,              // fixed vertical position at the top
-    static: true,        // not draggable
-  }));
+  const TEAMS_IN_A_ROW = 3;
+  const pinnedTeamNodes = teamNodesArray.map((teamNode, index) => {
+    const row = Math.floor(index / TEAMS_IN_A_ROW);
+    return {
+      ...teamNode,
+      color: '#9b59b6',
+      size: 600,
+      fx: (index % TEAMS_IN_A_ROW + 1) * 400, // fixed horizontal position
+      fy: yPositions[row] || 0,  // use lookup array; default to 0 if not defined
+      static: true,
+    };
+  });
 
   // Create links from each team node to its members.
   const teamLinks: Link[] = [];
@@ -233,19 +240,20 @@ const Home: React.FC = () => {
     let extraProps = {};
     if (node.team && node.x === undefined && node.y === undefined && teamPositions.has(node.team)) {
       const teamPos = teamPositions.get(node.team)!;
-      extraProps = { x: teamPos.x, y: teamPos.y + 100 };
+      debugger;
+      extraProps = { x: teamPos.x - Math.random() * 100, y: teamPos.y + Math.random() * 100 };
     } else if (node.x !== undefined && node.y !== undefined) {
       extraProps = { x: node.x, y: node.y };
     }
     return {
       id: node.id,
-      label: nodeLabel,
+      label: `${nodeLabel}`,
       color: statusColors[node.status],
       opacity: node.status === 'Rejected' ? 0.4 : 1,
       ...extraProps,
     };
   });
-  
+
   // Merge person nodes & pinned team nodes.
   const graphNodes = [...graphPersonNodes, ...pinnedTeamNodes];
   const graphLinks = [...filteredLinks, ...teamLinks];
@@ -291,7 +299,7 @@ const Home: React.FC = () => {
     debugger
     // Ignore team nodes (or any node not present in your state)
     if (!nodes.some((n) => n.id === nodeId)) return;
-    
+
     setNodes((prev) =>
       prev.map((n) =>
         n.id === nodeId ? { ...n, x, y } : n
