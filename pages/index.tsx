@@ -358,6 +358,12 @@ const Home: React.FC = () => {
     new Set(nodes.map((node) => node.team).filter((team) => team !== ''))
   );
 
+  // Calculate status stats
+  const statusStats = Object.keys(statusColors).reduce((acc, status) => {
+    acc[status] = nodes.filter(node => node.status === status).length;
+    return acc;
+  }, {} as Record<string, number>);
+
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif', backgroundColor: '#f5f5f5' }}>
       <h1 style={{ textAlign: 'center', color: '#333' }}>Hiring Pipeline Manager</h1>
@@ -562,6 +568,33 @@ const Home: React.FC = () => {
               />
               Starred Only
             </label>
+          </div>
+
+          {/* Status Statistics */}
+          <div style={{ marginTop: '20px' }}>
+            <h3 style={{ marginBottom: '15px' }}>Pipeline Statistics</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+              {Object.entries(statusStats).map(([status, count]) => (
+                <div
+                  key={status}
+                  onClick={() => setFilterStatus(status)}
+                  style={{
+                    padding: '10px',
+                    borderRadius: '6px',
+                    backgroundColor: `${statusColors[status]}20`,
+                    border: `2px solid ${statusColors[status]}`,
+                    minWidth: '100px',
+                    cursor: 'pointer',
+                    opacity: filterStatus === status ? 1 : 0.7,
+                    transform: filterStatus === status ? 'scale(1.05)' : 'scale(1)',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <div style={{ fontSize: '20px', fontWeight: 'bold' }}>{count}</div>
+                  <div style={{ color: '#666' }}>{status}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
